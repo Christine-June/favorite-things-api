@@ -1,12 +1,22 @@
 from flask import Flask, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
 
 app = Flask(__name__)
 
-favorite_things = [
-    {"id": 1, "type": "movie", "title": "War Room"},
-    {"id": 2, "type": "book", "title": "The Bible"},
-    {"id": 3, "type": "game", "title": "PS"}
-]
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///favorites.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+
+class Favorite(db.Model):
+    __tablename__ = 'favorites'
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String)
+    type = db.Column(db.String)
+
+
+    def to_dict(self):
+        return {"id": self.id, "title": self.title, "type": self.type}
 
 @app.route('/')
 def index():
@@ -14,55 +24,38 @@ def index():
 
 @app.route('/favorites', methods=['GET'])
 def get_favorites():
-    return jsonify(favorite_things), 200
+    favorites = Favorite.query.all()
+    return jsonify([fav.to_dict() for fav in favorites])
 
 @app.route('/favorites/<int:id>', methods=['GET'])
 def get_favorite(id):
-    favorite = next((item for item in favorite_things if item["id"] == id), None)
+    favorite = Favorite.query.get(id)
     if favorite:
-        return jsonify(favorite), 200
+        return jsonify(favorite.to_dict())
     return jsonify(error="Favorite not found"), 404
 
 @app.route('/favorites', methods=['POST'])
 def add_favorite():
     data = request.get_json()
-    print(f"Received data: {data}")
 
     if not data.get("title") or not data.get("type"):
         return jsonify(error="Title and type are required."), 400
 
-    new_favorite = {
-        "id": max([f["id"] for f in favorite_things]) + 1 if favorite_things else 1,
-        "title": data["title"],
-        "type": data["type"]
-    }
+    new_favorite = Favorite(title=data["title"], type=data["type"])
+    db.session.add(new_favorite)
+    db.session.commit()
 
-    favorite_things.append(new_favorite)
-    return jsonify(new_favorite), 201
+    return jsonify(new_favorite.to_dict()), 201
 
 @app.route('/favorites/<int:id>', methods=['DELETE'])
 def delete_favorite(id):
-    global favorite_things
-    favorite = next((item for item in favorite_things if item["id"] == id), None)
+    favorite = Favorite.query.get(id)
     if not favorite:
         return jsonify(error="Favorite not found"), 404
 
-    favorite_things = [item for item in favorite_things if item["id"] != id]
+    db.session.delete(favorite)
+    db.session.commit()
     return jsonify(message="Favorite deleted"), 200
-
-@app.route('/favorites/<int:id>', methods=['PUT'])
-def update_favorite(id):
-    data = request.get_json()
-    favorite = next((item for item in favorite_things if item["id"] == id), None)
-
-    if not favorite:
-        return jsonify(error="Favorite not found"), 404
-
-    favorite["title"] = data.get("title", favorite["title"])
-    favorite["type"] = data.get("type", favorite["type"])
-
-    return jsonify(favorite), 200
-
 
 if __name__ == '__main__':
     app.run(port=5000, debug=True)
